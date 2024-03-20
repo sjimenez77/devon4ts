@@ -8,7 +8,7 @@ import {
 import * as path from 'path';
 import { ASTFileBuilder } from '../../utils/ast-file-builder';
 import { ensureConfigFile } from '../../utils/config/config-defaults';
-import { existsConvictConfig, getNpmScope } from '../../utils/tree-utils';
+import { ensureProjectIsAnApplication, existsConvictConfig, getNpmScope } from '../../utils/tree-utils';
 import { packagesVersion } from '../packagesVersion';
 import {
   defaultSwaggerConfig,
@@ -21,6 +21,8 @@ import { SwaggerGeneratorSchema } from './schema';
 export async function swaggerGenerator(tree: Tree, options: SwaggerGeneratorSchema): Promise<() => void> {
   const appConfig = readProjectConfiguration(tree, options.projectName);
 
+  ensureProjectIsAnApplication(appConfig);
+
   addDependenciesToPackageJson(
     tree,
     { [packagesVersion['nestjsSwagger'].name]: packagesVersion['nestjsSwagger'].version },
@@ -29,6 +31,7 @@ export async function swaggerGenerator(tree: Tree, options: SwaggerGeneratorSche
   const projectRoot = appConfig.sourceRoot ?? 'src/';
   const existsConvict = existsConvictConfig(tree, projectRoot);
   addSwaggerToMain(tree, projectRoot, existsConvict);
+  updateWebpack(tree, path.join(projectRoot, '..'));
   if (existsConvict) {
     ensureConfigFile(tree, appConfig.root, getNpmScope(tree));
     updateConfigTypeFile(tree, appConfig.root);
@@ -79,4 +82,24 @@ function updateConfigTypeFile(tree: Tree, projectRoot: string): void {
     .build();
 
   tree.write(typesFile, typesFileContent);
+}
+
+function updateWebpack(tree: Tree, projectRoot: string): void {
+  const webpackFile = path.join(projectRoot, 'webpack.config.js');
+
+  let webpackFileContent = tree.read(webpackFile)!.toString('utf-8');
+  webpackFileContent = webpackFileContent.replace(
+    `target: 'node',`,
+    `target: 'node',
+      transformers: [
+        {
+          name: '@nestjs/swagger/plugin',
+          options: {
+            introspectComments: true,
+          },
+        },
+      ],`,
+  );
+
+  tree.write(webpackFile, webpackFileContent);
 }
